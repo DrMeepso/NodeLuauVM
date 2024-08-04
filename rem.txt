@@ -1,0 +1,3 @@
+https://github.com/rce-incorporated/Fiu/blob/main/Source.lua - etitre vm
+
+https://github.com/luau-lang/luau/blob/master/VM/src/lvmload.cpp - loading the binary file
