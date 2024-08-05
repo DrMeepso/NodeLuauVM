@@ -1,4 +1,3 @@
-import { buffer } from "stream/consumers";
 import { OpCodeNames, OpCodeModes } from "./OpCodes"; // Import the generated OpCodeNames and OpCodeModes arrays
 
 enum OpMode {
