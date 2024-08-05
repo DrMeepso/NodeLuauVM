@@ -1,5 +1,1 @@
-function Main()
-    print("Hello World!") 
-end
-
-Main()
+print("Hello world!")

@@ -1,6 +1,6 @@
 import { OpCodeNames, OpCodeModes } from "./OpCodes"; // Import the generated OpCodeNames and OpCodeModes arrays
 import { BinaryReader } from "./binaryReader";
-import { HasAux, ReadOpCode } from "./readWord";
+import { HasAux, ReadOpCode, type Instruction } from "./readWord";
 
 interface Proto {
 
@@ -12,7 +12,7 @@ interface Proto {
     DebugName: string; // name of the function
 
     NumInstructions: number;
-    Instructions: Array<number>;
+    Instructions: Array<Instruction>;
 
     NumConstants: number;
     Constants: Array<any>;
@@ -52,7 +52,7 @@ function ReadProto(reader: BinaryReader, ByteCodeID: number, StringArray: Array<
     reader.pointer += UserTypesCount; // skip the user types
 
     let NumInstructions = reader.readVarInt(); // Code Size
-    let Instructions: Array<number> = [];
+    let Instructions: Array<Instruction> = [];
     for (let i = 0; i < NumInstructions; i++)
     {
         let word = reader.readWord();
@@ -62,9 +62,13 @@ function ReadProto(reader: BinaryReader, ByteCodeID: number, StringArray: Array<
             aux = reader.readWord();
             i++;
         }
-        ReadOpCode(Buffer.from([word,aux]));
-        //console.log("Opcode: " + OpCodeNames[opcode]);
-        Instructions.push(word);
+        let buff = Buffer.alloc(8);
+        buff.writeUInt32LE(word);
+        if (hasAUX) {
+            buff.writeUInt32LE(aux, 4);
+        }
+        let inst = ReadOpCode(buff);
+        Instructions.push(inst);
     }
 
     //console.log("Instructions: " + Instructions);
@@ -72,7 +76,6 @@ function ReadProto(reader: BinaryReader, ByteCodeID: number, StringArray: Array<
     let NumConstants = reader.readVarInt(); // number of constants
     let Constants: Array<Constant> = [];
     //console.log("NumConstants: " + NumConstants);
-
     function addConstant(type: number, value: any)
     {
         Constants.push({type: type, value: value});
@@ -121,7 +124,7 @@ function ReadProto(reader: BinaryReader, ByteCodeID: number, StringArray: Array<
         }
     }
 
-    //console.log("Constants: ",Constants);
+    console.log("Constants: ",Constants);
 
     let NumProtos = reader.readVarInt(); // number of nested functions
     let Protos: Array<Number> = [];

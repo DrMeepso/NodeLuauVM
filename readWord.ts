@@ -1,3 +1,4 @@
+import { buffer } from "stream/consumers";
 import { OpCodeNames, OpCodeModes } from "./OpCodes"; // Import the generated OpCodeNames and OpCodeModes arrays
 
 enum OpMode {
@@ -12,6 +13,16 @@ enum OpMode {
     E = 0b00001,
 }
 
+export interface Instruction {
+    A: number | undefined;
+    B: number | undefined;
+    C: number | undefined;
+    D: number | undefined;
+    E: number | undefined;
+    Aux: Buffer | undefined;
+    OpCode: number;
+}
+
 export function HasAux(opcode: number)
 {
     let OpMode: number = OpCodeModes[opcode];
@@ -23,17 +34,90 @@ export function HasAux(opcode: number)
     return ((OpMode & 0b0000001) == 0b0000001) || ((OpMode & 0b0000010) == 0b0000010);
 }
 
-export function ReadOpCode(word: Buffer)
+export function ReadOpCode(word: Buffer): Instruction
 {
     let opCode = word.readUInt8(0);
 
     console.log("Opcode: " + OpCodeNames[opCode], "Mode: " + OpMode[OpCodeModes[opCode]>>2]);
 
-    let OpCodeArguments = {
-        "A": undefined,
-        "B": undefined,
-        "C": undefined,
-        "D": undefined,
-        "E": undefined,
-    };
+    // ABC
+    // AD
+    function InsA(): number {
+        return word.readUInt8(1);
+    }
+    // b is always behind a and c
+    function InsB(): number {
+        return word.readUInt8(2);
+    }
+    function InsC(): number {
+        return word.readUInt8(3);
+    }
+    // d is a 16-bit value, its behind a
+    // AD mode
+    function InsD(): number {
+        return word.readInt16LE(2);
+    }
+    // E - least-significant byte for the opcode, followed by E (24-bit integer). E is a signed integer that commonly specifies a jump offset
+    // E
+    function InsE(): number {
+        return word.readInt32LE(1);
+    }
+
+    let A,B,C,D,Aux
+    switch(true)
+    {
+        case OpMode[OpCodeModes[opCode]>>2] == "A":
+            A = InsA();
+            console.log("A: " + A);
+            break;
+        case OpMode[OpCodeModes[opCode]>>2] == "AB":
+            A = InsA();
+            B = InsB();
+            console.log("A: " + A, "B: " + B);
+            break;
+        case OpMode[OpCodeModes[opCode]>>2] == "AC":
+            A = InsA();
+            C = InsC();
+            console.log("A: " + A, "C: " + C);
+            break;
+        case OpMode[OpCodeModes[opCode]>>2] == "ABC":
+            A = InsA();
+            B = InsB();
+            C = InsC();
+            console.log("A: " + A, "B: " + B, "C: " + C);
+            break;
+        case OpMode[OpCodeModes[opCode]>>2] == "AD":
+            A = InsA();
+            D = InsD();
+            console.log("A: " + A, "D: " + D);
+            break;
+        case OpMode[OpCodeModes[opCode]>>2] == "D":
+            D = InsD();
+            console.log("D: " + D);
+            break;
+        case OpMode[OpCodeModes[opCode]>>2] == "E":
+            D = InsE();
+            console.log("E: " + D);
+            break;
+        default:
+            console.warn("Error reading OpCode words" + OpCodeNames[opCode]);
+            break;
+    }
+
+    if (HasAux(opCode))
+    {
+        // slice buffer
+        Aux = word.slice(4, 8);
+        console.log("Aux:", Aux);
+    }
+
+    return {
+        A: A,
+        B: B,
+        C: C,
+        D: D,
+        E: D,
+        Aux: Aux,
+        OpCode: opCode
+    } as Instruction;
 }
