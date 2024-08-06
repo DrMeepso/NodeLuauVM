@@ -1,15 +1,16 @@
 import { spawn } from "child_process";
 import { DeserializeLuau } from "./luauVM";
+import fs from "fs";
 
-function GenByteCode(fileName: string): Promise<string> // byte code
+function GenByteCode(fileName: string): Promise<Buffer> // byte code
 {
     return new Promise((resolve, reject) => {
 
         let luauCompiler = spawn("luau-compile", ["--binary", fileName]); // get the textual representation of the bytecode from the luau compiler
-        let byteCode = "";
+        let byteCode = Buffer.from("");
 
         luauCompiler.stdout.on("data", (data) => {
-            byteCode += data.toString();
+            byteCode = Buffer.concat([byteCode, data]);
         });
 
         luauCompiler.stderr.on("data", (data) => {
@@ -27,6 +28,6 @@ function GenByteCode(fileName: string): Promise<string> // byte code
 async function main()
 {
     let byteCode = await GenByteCode("test.lua");
-    DeserializeLuau(Buffer.from(byteCode));
+    DeserializeLuau(byteCode);
 }
 main();

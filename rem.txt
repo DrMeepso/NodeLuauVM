@@ -3,3 +3,5 @@ https://github.com/rce-incorporated/Fiu/blob/main/Source.lua - etitre vm
 https://github.com/luau-lang/luau/blob/master/VM/src/lvmload.cpp - loading the binary file
 
 https://github.com/luau-lang/luau/blob/master/VM/src/lvmexecute.cpp - op code implementations
+
+https://gist.github.com/TheGreatSageEqualToHeaven/08dc441f3e61d83c058c8cd2143bc1bc - op code check

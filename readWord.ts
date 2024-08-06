@@ -1,5 +1,8 @@
 import { OpCodeNames, OpCodeModes } from "./OpCodes"; // Import the generated OpCodeNames and OpCodeModes arrays
 
+const logOpCodes = false;
+const logOpModes = false;
+
 enum OpMode {
     None = 0b00000,
     A = 0b10000,
@@ -30,14 +33,15 @@ export function HasAux(opcode: number)
         console.warn("Invalid opcode " + opcode);
         return false;
     }
-    return ((OpMode & 0b0000001) == 0b0000001) || ((OpMode & 0b0000010) == 0b0000010);
+    return ((OpMode & 0b0000010) == 0b0000010);
 }
 
 export function ReadOpCode(word: Buffer): Instruction
 {
     let opCode = word.readUInt8(0);
 
-    console.log("Opcode: " + OpCodeNames[opCode], "Mode: " + OpMode[OpCodeModes[opCode]>>2]);
+    if (logOpCodes)
+        console.log("Opcode: " + OpCodeNames[opCode], "Mode: " + OpMode[OpCodeModes[opCode]>>2]);
 
     // ABC
     // AD
@@ -59,7 +63,9 @@ export function ReadOpCode(word: Buffer): Instruction
     // E - least-significant byte for the opcode, followed by E (24-bit integer). E is a signed integer that commonly specifies a jump offset
     // E
     function InsE(): number {
-        return word.readInt32LE(1);
+        let first8 = word.readUInt8(1);
+        let last16 = word.readInt16LE(2);
+        return (last16 << 8) | first8;
     }
 
     let A,B,C,D,Aux
@@ -67,36 +73,45 @@ export function ReadOpCode(word: Buffer): Instruction
     {
         case OpMode[OpCodeModes[opCode]>>2] == "A":
             A = InsA();
-            console.log("A: " + A);
+            if (logOpModes)
+                console.log("A: " + A);
             break;
         case OpMode[OpCodeModes[opCode]>>2] == "AB":
             A = InsA();
             B = InsB();
-            console.log("A: " + A, "B: " + B);
+            if (logOpModes)
+                console.log("A: " + A, "B: " + B);
             break;
         case OpMode[OpCodeModes[opCode]>>2] == "AC":
             A = InsA();
             C = InsC();
-            console.log("A: " + A, "C: " + C);
+            if (logOpModes)
+                console.log("A: " + A, "C: " + C);
             break;
         case OpMode[OpCodeModes[opCode]>>2] == "ABC":
             A = InsA();
             B = InsB();
             C = InsC();
-            console.log("A: " + A, "B: " + B, "C: " + C);
+            if (logOpModes)
+                console.log("A: " + A, "B: " + B, "C: " + C);
             break;
         case OpMode[OpCodeModes[opCode]>>2] == "AD":
             A = InsA();
             D = InsD();
-            console.log("A: " + A, "D: " + D);
+            if (logOpModes)
+                console.log("A: " + A, "D: " + D);
             break;
         case OpMode[OpCodeModes[opCode]>>2] == "D":
             D = InsD();
-            console.log("D: " + D);
+            if (logOpModes)
+                console.log("D: " + D);
             break;
         case OpMode[OpCodeModes[opCode]>>2] == "E":
             D = InsE();
-            console.log("E: " + D);
+            if (logOpModes)
+                console.log("E: " + D);
+            break;
+        case OpMode[OpCodeModes[opCode]>>2] == "None":
             break;
         default:
             console.warn("Error reading OpCode words" + OpCodeNames[opCode]);
@@ -107,7 +122,8 @@ export function ReadOpCode(word: Buffer): Instruction
     {
         // slice buffer
         Aux = word.slice(4, 8);
-        console.log("Aux:", Aux);
+        if (logOpModes)
+            console.log("Aux:", Aux);
     }
 
     return {

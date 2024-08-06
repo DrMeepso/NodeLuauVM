@@ -112,7 +112,7 @@ async function main() {
     writeLine(`// Generated at ${new Date().toUTCString()}`);
     writeLine(`export const OpCodeNames = [`);
     for (let op of AllOpcodes) {
-        writeLine(`    "${op.name.replace("LOP_", "")}",`);
+        writeLine(`    "${op.name.replace("LOP_", "")}", // OP: ${op.opcode}`);
     }
     writeLine(`]`);
     writeLine(``)
