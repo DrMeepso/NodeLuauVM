@@ -1,5 +1,5 @@
 import { spawn } from "child_process";
-import { RunLuau } from "./luauVM";
+import { DeserializeLuau } from "./luauVM";
 
 function GenByteCode(fileName: string): Promise<string> // byte code
 {
@@ -27,7 +27,6 @@ function GenByteCode(fileName: string): Promise<string> // byte code
 async function main()
 {
     let byteCode = await GenByteCode("test.lua");
-    //console.log(byteCode);
-    RunLuau(Buffer.from(byteCode));
+    DeserializeLuau(Buffer.from(byteCode));
 }
 main();

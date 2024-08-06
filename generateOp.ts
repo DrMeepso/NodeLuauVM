@@ -112,9 +112,15 @@ async function main() {
     writeLine(`// Generated at ${new Date().toUTCString()}`);
     writeLine(`export const OpCodeNames = [`);
     for (let op of AllOpcodes) {
-        writeLine(`    "${op.name.split("_")[1]}",`);
+        writeLine(`    "${op.name.replace("LOP_", "")}",`);
     }
     writeLine(`]`);
+    writeLine(``)
+    writeLine(`export enum OpCode {`);
+    for (let op of AllOpcodes) {
+        writeLine(`    ${op.name.replace("LOP_", "")} = ${op.opcode},`);
+    }
+    writeLine(`}`);
     writeLine(``)
     writeLine(`export const OpCodeModes = [`);
     for (let op of AllOpcodes) {

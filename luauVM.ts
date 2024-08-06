@@ -1,4 +1,5 @@
-import { OpCodeNames, OpCodeModes } from "./OpCodes"; // Import the generated OpCodeNames and OpCodeModes arrays
+import exp from "constants";
+import { OpCodeNames, OpCodeModes, OpCode } from "./OpCodes"; // Import the generated OpCodeNames and OpCodeModes arrays
 import { BinaryReader } from "./binaryReader";
 import { HasAux, ReadOpCode, type Instruction } from "./readWord";
 
@@ -27,16 +28,41 @@ interface Proto {
 
 }
 
-interface Constant {
-    type: number;
-    value: any;
-}
-
 interface LocateVariable {
     name: string;
     start: number;
     end: number;
     register: number;
+}
+
+// implement later
+//type Closure = {}
+
+// any type that is possible in lua
+type LuaType = string | number | boolean | null | LuaTable | Closure;
+
+type LuaTable = Map<LuaType, LuaType>;
+
+enum StackType {
+    Nil = 0,
+    Bool = 1,
+    Number = 2,
+    String = 3,
+    Table = 4,
+    Closure = 5,
+    Vector = 6,
+    Import = 7 // still dont know what this dose
+}
+
+interface StackValue {
+    type: StackType;
+    value: LuaType;
+}
+
+interface Program {
+    Protos: Array<Proto>;
+    MainProto: number;
+    GlobalEnv: Map<string, StackValue>; // global environment of the program, getenv and setenv
 }
 
 function ReadProto(reader: BinaryReader, ByteCodeID: number, StringArray: Array<string>)
@@ -74,7 +100,7 @@ function ReadProto(reader: BinaryReader, ByteCodeID: number, StringArray: Array<
     //console.log("Instructions: " + Instructions);
 
     let NumConstants = reader.readVarInt(); // number of constants
-    let Constants: Array<Constant> = [];
+    let Constants: Array<StackValue> = [];
     //console.log("NumConstants: " + NumConstants);
     function addConstant(type: number, value: any)
     {
@@ -87,33 +113,33 @@ function ReadProto(reader: BinaryReader, ByteCodeID: number, StringArray: Array<
         switch (type)
         {
             case 0: // nil
-                addConstant(0, null);
+                addConstant(StackType.Nil, null);
                 break;
             case 1: // bool
-                addConstant(1, reader.readByte() != 0);
+                addConstant(StackType.Bool, reader.readByte() != 0);
                 break;
             case 2: // number
-                addConstant(2, reader.readDouble());
+                addConstant(StackType.Number, reader.readDouble());
                 break;
             case 3: // string
                 let stringIndex = reader.readVarInt();
-                addConstant(3, StringArray[stringIndex-1]);
+                addConstant(StackType.String, StringArray[stringIndex-1]);
                 break;
-            case 4: // import?
+            case 4: // import - i dont know what this is for
                 let world = reader.readWord();
-                addConstant(4, world);
+                addConstant(StackType.Import, world);
                 break;
             case 5: // table
                 let tableSize = reader.readVarInt();
-                let table: number[] = [];
+                let table: LuaTable = new Map();
                 for (let i = 0; i < tableSize; i++)
                 {
-                    table[i] = reader.readVarInt();
+                    table.set(table.size, reader.readVarInt());
                 }
-                addConstant(5, table);
+                addConstant(StackType.Table, table);
                 break;
             case 6: // closure / function
-                addConstant(6, reader.readVarInt());
+                addConstant(StackType.Closure, reader.readVarInt());
                 break;
             case 7: // vector
                 console.log("Why is there a vector?")
@@ -228,10 +254,127 @@ function ReadProto(reader: BinaryReader, ByteCodeID: number, StringArray: Array<
 
 }
 
+export function ClosureFromProto(parentProgram: Program, Proto: number, )
+{
 
-export function RunLuau(source: Buffer)
+
+
+}
+
+class Closure {
+
+    parentProgram: Program;
+    baseProto: Proto;
+    // need a upvalue type / interface
+    //upvalues: Array<LuaType>; //  an array of any type of lua value
+    registers: Array<StackValue>;
+    childProtos: Array<Number>;
+
+    pointer = 0; // the current instruction that is being executed
+    code: Array<Instruction>; // the bytecode of the closure
+
+    constructor(parentProgram: Program, Proto: number, Upvalues: Array<number>)
+    {
+        this.parentProgram = parentProgram;
+        this.baseProto = parentProgram.Protos[Proto];
+        this.registers = new Array<StackValue>();
+        this.childProtos = this.baseProto.Protos;
+        this.code = this.baseProto.Instructions;
+        //this.upvalues = Upvalues;
+    }
+
+    runInstruction()
+    {
+        if (this.pointer >= this.code.length)
+        {
+            console.error("Program counter is out of bounds");
+            return;
+        }
+        let instruction = this.code[this.pointer];
+
+        switch(instruction.OpCode)
+        {
+            case OpCode.NOP: // no operation
+                console.warn("LVM > why was there a NOP?");
+                this.pointer++;
+                break
+
+            case OpCode.BREAK: // break
+                // implament breakpoints later
+                console.warn("LVM > Proto hit breakpoint during execution: I", this.pointer);
+                this.pointer++;
+                break
+
+            case OpCode.LOADNIL: // load a nil value into target register
+                this.registers[instruction.A!] = {type: StackType.Nil, value: null};
+                this.pointer++;
+                break;
+
+            case OpCode.LOADB: // load a boolean value into target register
+                this.registers[instruction.A!] = {type: StackType.Bool, value: instruction.B! != 0};
+                this.pointer++;
+                break;
+
+            case OpCode.LOADN: // load a number value into target register
+                this.registers[instruction.A!] = {type: StackType.Number, value: instruction.D!};
+                this.pointer++;
+                break;
+
+            case OpCode.LOADK: // load a constant from the baseProto into target register
+                let c: StackValue = this.baseProto.Constants[instruction.B!];
+                this.registers[instruction.A!] = {type: c.type, value: c.value};
+                this.pointer++;
+                break;
+
+            case OpCode.MOVE: // copy the value of one register to another
+                let v = this.registers[instruction.B!];
+                Object.assign(this.registers[instruction.A!], v);
+                this.pointer++;
+                break;
+
+            case OpCode.GETGLOBAL: // use the AUX as a key in the constant table to get a global value
+                let getConstIndex = instruction.Aux?.readUint32LE(0);
+
+                let globalGetKey = this.baseProto.Constants[getConstIndex!];
+                if (globalGetKey.type != StackType.String) throw new Error("LVM > Global key is not a string");
+
+                let globalValue = this.parentProgram.GlobalEnv.get(globalGetKey.value as string);
+                if (globalValue == undefined) throw new Error("LVM > Global value not found");
+
+                // this can be anything from the global environment
+                this.registers[instruction.A!] = {type: globalValue.type, value: globalValue.value};
+                this.pointer++;
+                break;
+
+            case OpCode.SETGLOBAL: 
+                let setConstIndex = instruction.Aux?.readUint32LE(0);
+
+                let globalSetkey = this.baseProto.Constants[setConstIndex!];
+                if (globalSetkey == undefined) throw new Error("LVM > Global key is not a string");
+
+                this.parentProgram.GlobalEnv.set(globalSetkey.value as string, this.registers[instruction.A!]);
+                this.pointer++;
+                break;
+            
+            case OpCode.GETUPVAL:
+
+            default:
+                if (instruction.OpCode < OpCode._COUNT) {
+                    console.warn("LVM > Opcode not implemented: " + OpCodeNames[instruction.OpCode]);
+                    this.pointer++; // probably shouldnt continue
+                } else
+                    console.error("Invalid opcode: " + instruction.OpCode);
+                break;
+        }
+
+    }
+
+}
+
+export function DeserializeLuau(source: Buffer)
 {
     const reader = new BinaryReader(source);
+    const lProgram = {} as Program;
 
     let luauVersion = reader.readByte();
     let typesVersion = 0; // only used after luau version 4
@@ -272,9 +415,15 @@ export function RunLuau(source: Buffer)
         Protos.push(ReadProto(reader, i, stringTable));
         console.log("Proto:", Protos[i].DebugName || "(??)");
     }
+    lProgram.Protos = Protos;
 
-    let MainProtoIndex = reader.readVarInt();
-    console.log("Main proto index: " + MainProtoIndex);
-    let MainProto = Protos[MainProtoIndex];
+    lProgram.MainProto = reader.readVarInt() as number;
+    console.log("Main proto index: " + lProgram.MainProto);
+
+    lProgram.GlobalEnv = new Map<string, StackValue>();
+    
+    let WrapedProto = new Closure(lProgram, lProgram.MainProto, []);
+    WrapedProto.runInstruction();
+    WrapedProto.runInstruction();
 
 }
