@@ -2,6 +2,15 @@ import { Closure, ClosureType, ImportTable, LuaTable, LuaType, Program, Proto, S
 import { OpCode, OpCodeNames } from "./OpCodes";
 import { Instruction } from "./readWord";
 
+function IsVType(value: LuaType, type: StackType): boolean
+{
+    return value == type;
+}
+function IsSVType(value: StackValue, type: StackType): boolean
+{
+    return value.type == type;
+}
+
 // a closure containing lua bytecode
 export class LuaClosure implements Closure {
 
@@ -540,6 +549,31 @@ export class LuaClosure implements Closure {
                 this.pointer++;
                 break;
 
+            case OpCode.SETLIST: // loop though registures and set them in a table
+                let setListTable = this.registers[instruction.A!];
+                if (setListTable.type != StackType.Table) this.throwError("LVM > Attempt to set list in non-table");
+
+                let setListStart = instruction.B!; // the first register to start at
+                let setListCount = instruction.C! - 1; // the amount of registers to loop through
+
+                if (setListCount == 0)
+                {
+                    setListCount = this.topOfStack - setListStart + 1;
+                }
+
+                let tableIndexStart = instruction.Aux!.readUint32LE(0);
+
+                for (let i = 0; i < setListCount; i++)
+                {
+                    (setListTable.value as LuaTable).set(tableIndexStart + i, this.registers[setListStart + i]);
+                }
+
+                this.pointer++;
+                break;
+
+            case OpCode.FORNPREP: // setup registers for a numeric for loop!
+                
+
             default:
                 if (instruction.OpCode < OpCode._COUNT) {
                     console.error("LVM > Opcode not implemented: " + OpCodeNames[instruction.OpCode]);
@@ -560,8 +594,8 @@ export class LuaClosure implements Closure {
             this.returnValues = [];
             while (!this.hasFinished)
             {
-                console.log("LVM > Running instruction:" + this.pointer);
-                console.log("Program Line:", this.baseProto.InstructionInfo[this.pointer]);
+                //console.log("LVM > Running instruction:" + this.pointer);
+                //console.log("Program Line:", this.baseProto.InstructionInfo[this.pointer]);
                 await this.runInstruction();
             }
             resolve(this.returnValues);

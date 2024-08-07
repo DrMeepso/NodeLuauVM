@@ -1,9 +1,6 @@
-import { assert, count } from "console";
-import { OpCodeNames, OpCodeModes, OpCode } from "./OpCodes"; // Import the generated OpCodeNames and OpCodeModes arrays
 import { BinaryReader } from "./binaryReader";
-import { HasAux, ReadOpCode, type Instruction } from "./readWord";
-import exp from "constants";
 import { LuaClosure } from "./luauClosure";
+import { HasAux, ReadOpCode, type Instruction } from "./readWord";
 
 export interface Proto {
 
@@ -286,9 +283,24 @@ export function ReadProto(reader: BinaryReader, ByteCodeID: number, StringArray:
 
 }
 
+export function luaTypeFromNodeValue(value: any): StackValue {
+    if (value == null) return {type: StackType.Nil, value: null};
+    if (typeof value == "boolean") return {type: StackType.Bool, value: value};
+    if (typeof value == "number") return {type: StackType.Number, value: value};
+    if (typeof value == "string") return {type: StackType.String, value: value};
+    if (value instanceof Map) return {type: StackType.Table, value: value};
+    if (value.type == ClosureType.LUA || value.type == ClosureType.NODE) return {type: StackType.Closure, value: value};
+
+    return {type: StackType.Nil, value: null}; // we dont know what it is :/
+}
+
 // implement later
-export function WrapClosure(lclosure: Closure): (...args: any[]) => any[] {
-    return (...args: any[]) => {return [""]};
+export function WrapClosure(lclosure: LuaClosure): (...args: any[]) => Promise<any[]> {
+    return async function(...args: any[]) {
+        let luaArgs = args.map((arg) => { return luaTypeFromNodeValue(arg) });
+        let luaResp = await lclosure.Call(...luaArgs);
+        return luaResp.map((arg) => { return arg.value });
+    }
 }
 
 export enum ClosureType {
@@ -307,18 +319,9 @@ class NodeClosure implements Closure {
     LuaArgsToNodeArgs(args: StackValue[]): any[] {
         return args.map((arg) => { return arg.value });
     }
-    luaTypeFromNodeValue(value: any): StackValue {
-        if (value == null) return {type: StackType.Nil, value: null};
-        if (typeof value == "boolean") return {type: StackType.Bool, value: value};
-        if (typeof value == "number") return {type: StackType.Number, value: value};
-        if (typeof value == "string") return {type: StackType.String, value: value};
-        if (value instanceof Map) return {type: StackType.Table, value: value};
-        if (value.type == ClosureType.LUA || value.type == ClosureType.NODE) return {type: StackType.Closure, value: value};
-
-        return {type: StackType.Nil, value: null}; // we dont know what it is :/
-    }
     NodeArgsToLuaArgs(args: any[]): StackValue[] {
-        return args.map((arg) => { return this.luaTypeFromNodeValue(arg) });
+        if (args == null) return [];
+        return args.map((arg) => { return luaTypeFromNodeValue(arg) });
     }
 }
 
@@ -332,12 +335,12 @@ let nodePrint = new class Print extends NodeClosure {
 }
 
 // wrap a nodejs native function in a closure class so lua can call it!
-export function wrapNodeFunction(f: (...args: any[]) => any[]) {
+export function wrapNodeFunction(f: (...args: any[]) => any) {
     const newClosure = new NodeClosure();
     newClosure.Call = function(...args: StackValue[]): Promise<StackValue[]> {
-        return new Promise((resolve, reject) => {
+        return new Promise(async (resolve, reject) => {
             const nodeArgs = newClosure.LuaArgsToNodeArgs(args);
-            const nodeReturn = f(...nodeArgs);
+            const nodeReturn = await f(...nodeArgs);
             resolve(newClosure.NodeArgsToLuaArgs(nodeReturn));
         });
     }
@@ -397,16 +400,16 @@ export async function DeserializeLuau(source: Buffer)
     
     lProgram.Imports = {
         print: nodePrint,
+        wait: wrapNodeFunction((time: number) => { return new Promise((resolve) => { setTimeout(resolve, time) }) }),
         math: {
-            add: wrapNodeFunction((a: number, b: number) => { return [a + b, false] })
+            add: wrapNodeFunction((a: number, b: number) => { return [a + b] })
         }
     }
 
     let WrapedProto = new LuaClosure(lProgram, lProgram.MainProto, new Map<number, UpValue>());
-    
-    console.log(WrapedProto.baseProto.Constants);
+    let WrapedMain = WrapClosure(WrapedProto);
 
-    let values = await WrapedProto.Call();
+    let values = await WrapedMain();
     console.log("Return values: ", values);
 
 }
