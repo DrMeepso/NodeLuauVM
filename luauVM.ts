@@ -1,3 +1,4 @@
+import { assert, count } from "console";
 import { OpCodeNames, OpCodeModes, OpCode } from "./OpCodes"; // Import the generated OpCodeNames and OpCodeModes arrays
 import { BinaryReader } from "./binaryReader";
 import { HasAux, ReadOpCode, type Instruction } from "./readWord";
@@ -15,7 +16,7 @@ interface Proto {
     Instructions: Array<Instruction>;
 
     NumConstants: number;
-    Constants: Array<any>;
+    Constants: Array<StackValue>;
 
     NumProtos: number;
     Protos: Array<Number>;
@@ -40,7 +41,7 @@ interface LocateVariable {
 // any type that is possible in lua
 type LuaType = string | number | boolean | null | LuaTable | Closure;
 
-type LuaTable = Map<LuaType, LuaType>;
+type LuaTable = Map<LuaType, StackValue>;
 
 enum StackType {
     Nil = 0,
@@ -78,6 +79,18 @@ interface UpValueRef extends UpValue {
 interface UpValueAbs extends UpValue {
     isRef: false; // the value is stored in the upvalue
     value: StackValue;
+}
+
+function StackValueFromValue(value: any) 
+{
+    if (value == null) return {type: StackType.Nil, value: null};
+    if (typeof value == "boolean") return {type: StackType.Bool, value: value};
+    if (typeof value == "number") return {type: StackType.Number, value: value};
+    if (typeof value == "string") return {type: StackType.String, value: value};
+    if (value instanceof Map) return {type: StackType.Table, value: value};
+    if (value instanceof LuaClosure || value instanceof NodeClosure) return {type: StackType.Closure, value: value};
+    console.warn(`LVM > Unable to determine type of value: ${value}`);
+    return {type: StackType.Nil, value: null}; // we dont know what it is :/
 }
 
 function ReadProto(reader: BinaryReader, ByteCodeID: number, StringArray: Array<string>)
@@ -151,7 +164,7 @@ function ReadProto(reader: BinaryReader, ByteCodeID: number, StringArray: Array<
                 let table: LuaTable = new Map();
                 for (let i = 0; i < tableSize; i++)
                 {
-                    table.set(table.size, reader.readVarInt());
+                    table.set(table.size, StackValueFromValue(reader.readVarInt()));
                 }
                 addConstant(StackType.Table, table);
                 break;
@@ -189,7 +202,7 @@ function ReadProto(reader: BinaryReader, ByteCodeID: number, StringArray: Array<
 
     let LineInfoEnabled = reader.readByte() != 0; // is line info enabled?
     //console.log("Line info enabled: " + LineInfoEnabled);
-    let InstructionInfo: number[] = [];
+    let InstructionInfo: number[] = []; // the line number of each instruction, based on instruction index
     if (LineInfoEnabled)
     {
         let linegaplog2 = reader.readByte();
@@ -312,18 +325,18 @@ class NodeClosure implements Closure {
 let nodePrint = new class Print extends NodeClosure {
     type = ClosureType.NODE;
     async Call(...args: StackValue[]): Promise<StackValue[]> {
-        console.log("LVM:OUT >", this.LuaArgsToNodeArgs(args))
-        return args;
+        console.log("LVM:OUT >", ...this.LuaArgsToNodeArgs(args))
+        return [];
     }
 }
 
 // wrap a nodejs native function in a closure class so lua can call it!
 export function wrapNodeFunction(f: (...args: any[]) => any[]) {
-    let newClosure = new NodeClosure();
+    const newClosure = new NodeClosure();
     newClosure.Call = function(...args: StackValue[]): Promise<StackValue[]> {
         return new Promise((resolve, reject) => {
-            let nodeArgs = newClosure.LuaArgsToNodeArgs(args);
-            let nodeReturn = f(...nodeArgs);
+            const nodeArgs = newClosure.LuaArgsToNodeArgs(args);
+            const nodeReturn = f(...nodeArgs);
             resolve(newClosure.NodeArgsToLuaArgs(nodeReturn));
         });
     }
@@ -360,7 +373,14 @@ class LuaClosure implements Closure {
         //this.upvalues = Upvalues;
     }
 
-    runInstruction()
+    throwError(message: string)
+    {
+        // find the current line of the error
+        let line = this.baseProto.InstructionInfo[this.pointer];
+        throw new Error(`L:${line} | ${message}`);
+    }
+
+    async runInstruction()
     {
         if (this.pointer >= this.code.length)
         {
@@ -369,6 +389,7 @@ class LuaClosure implements Closure {
         }
         let instruction = this.code[this.pointer];
 
+        console.log("Running instruction: ", OpCodeNames[instruction.OpCode]);
         switch(instruction.OpCode)
         {
             case OpCode.NOP: // no operation
@@ -399,7 +420,6 @@ class LuaClosure implements Closure {
 
             case OpCode.LOADK: // load a constant from the baseProto into target register
                 let c: StackValue = this.baseProto.Constants[instruction.D!];
-                console.log("Loading constant: ", c);
                 this.registers[instruction.A!] = {type: c.type, value: c.value};
                 this.pointer++;
                 break;
@@ -414,7 +434,7 @@ class LuaClosure implements Closure {
                 let getConstIndex = instruction.Aux?.readUint32LE(0);
 
                 let globalGetKey = this.baseProto.Constants[getConstIndex!];
-                if (globalGetKey.type != StackType.String) throw new Error("LVM > Global key is not a string");
+                if (globalGetKey.type != StackType.String) this.throwError("LVM > Global key is not a string");
 
                 let globalValue = this.parentProgram.GlobalEnv.get(globalGetKey.value as string);
                 if (globalValue == undefined) throw new Error("LVM > Global value not found");
@@ -428,7 +448,7 @@ class LuaClosure implements Closure {
                 let setConstIndex = instruction.Aux?.readUint32LE(0);
 
                 let globalSetkey = this.baseProto.Constants[setConstIndex!];
-                if (globalSetkey == undefined) throw new Error("LVM > Global key is not a string");
+                if (globalSetkey == undefined) this.throwError("LVM > Global key is not a string");
 
                 this.parentProgram.GlobalEnv.set(globalSetkey.value as string, this.registers[instruction.A!]);
                 this.pointer++;
@@ -482,28 +502,162 @@ class LuaClosure implements Closure {
 
                 // AUX: 3 10-bit indices of constant strings that, combined, constitute an import path; length of the path is set by the top 2 bits (1,2,3)
                 let aux = instruction.Aux!.readUint32LE(0);
-                let pathLength: number = parseInt(aux.toString()[0]) // this is not the best way to do this, but because not sucks this works for now
+                let pathLength: number = 3 - Math.abs((aux >> 30) + 1);
                 
-                let indices = [aux & 0x3FF, (aux >> 10) & 0x3FF, (aux >> 20) & 0x3FF];
+                let indices = [(aux >> 20) & 0x3FF, (aux >> 10) & 0x3FF, aux & 0x3FF];
                 //console.log(this.baseProto.Constants)
-                let currentImport: ImportTable | Closure = this.parentProgram.Imports;
-                for (let i = 0; i < pathLength; i++)
-                {
-                    let key = this.baseProto.Constants[indices[i]];
-                    if (key.type != StackType.String) throw new Error("LVM > Import key is not a string");
-                    // check if 
-                    if (currentImport instanceof NodeClosure || currentImport instanceof LuaClosure){
-                        console.error("LVM > Import path is not a table");
-                        break;
-                    }
-                    let iTable: ImportTable = currentImport as ImportTable;
-                    if (iTable[key.value as string] == undefined) throw new Error("LVM > Import path not found");
-                    currentImport = iTable[key.value as string];
+                let currentTable: ImportTable = this.parentProgram.Imports;
+                let imported: Closure | undefined = undefined;
+                let consts: string[] = [ this.baseProto.Constants[indices[0]].value as string, this.baseProto.Constants[indices[1]].value as string, this.baseProto.Constants[indices[2]].value as string ];
+
+                if (pathLength == 1) {
+                    imported = currentTable[consts[0]] as Closure;
+                } else if (pathLength == 2) {
+                    let subTable: ImportTable = currentTable[consts[0]] as ImportTable;
+                    imported = subTable[consts[1]] as Closure;
+                } else if (pathLength == 3) {
+                    let subTable: ImportTable = currentTable[consts[0]] as ImportTable;
+                    let subSubTable: ImportTable = subTable[consts[1]] as ImportTable;
+                    imported = subSubTable[consts[2]] as Closure;
                 }
 
-                this.registers[instruction.A!] = {type: StackType.Closure, value: currentImport as Closure};
+                if (imported == undefined) throw new Error("LVM > Import path not found");
+
+                this.registers[instruction.A!] = {type: StackType.Closure, value: imported as Closure};
 
                 this.pointer++;
+                break;
+
+            case OpCode.GETTABLE:
+                let fetchedTable = this.registers[instruction.B!];
+                if (fetchedTable.type != StackType.Table) throw new Error("LVM > Value is not a table");
+                let fetchedValue = (fetchedTable.value as LuaTable).get(this.registers[instruction.C!].value);
+                if (fetchedValue == undefined) throw new Error("LVM > Value not found in table");
+                this.registers[instruction.A!] = fetchedValue;
+
+                this.pointer++;
+                break;
+            
+            case OpCode.SETTABLE:
+                let setTable = this.registers[instruction.A!];
+                if (setTable.type != StackType.Table) throw new Error(`LVM > attempt to set ${this.registers[instruction.B!].value} on type of ${setTable.type}`);
+                (setTable.value as LuaTable).set(this.registers[instruction.B!].value, this.registers[instruction.C!]);
+                this.pointer++;
+                break;
+
+            case OpCode.GETTABLEKS: // fetch a value from a table using a constant key
+                let GTKconstIndex = instruction.Aux!.readUint32LE(0);
+                let GTKtable = this.registers[instruction.B!];
+                if (GTKtable.type != StackType.Table) this.throwError("LVM > Attempt to get table value from non-table");
+                
+                let GTKkey = this.baseProto.Constants[GTKconstIndex];
+                let GTKvalue: StackValue | undefined = (GTKtable.value as LuaTable).get(GTKkey.value);
+                if (GTKvalue == undefined) throw new Error("LVM > Table key not found on constant table?");
+                this.registers[instruction.A!] = GTKvalue;
+
+                this.pointer++;
+                break;
+
+            case OpCode.SETTABLEKS: // set a value in a table using a constant key
+                let STKconstIndex = instruction.Aux!.readUint32LE(0);
+                let STKtable = this.registers[instruction.B!];
+                if (STKtable.type != StackType.Table) this.throwError("LVM > Attempt to set table value from non-table");
+
+                let STKkey = this.baseProto.Constants[STKconstIndex];
+                (STKtable.value as LuaTable).set(STKkey.value, this.registers[instruction.A!]);
+
+                this.pointer++;
+                break;
+
+            case OpCode.GETTABLEN: // get value from table using smallint as a key (C)
+                let GTNTable = this.registers[instruction.B!];
+                if (GTNTable.type != StackType.Table) this.throwError("LVM > Attempt to get table value from non-table");
+
+                let GTNValue = (GTNTable.value as LuaTable).get(instruction.C!);
+                if (GTNValue == undefined) // not our issue, lua will just return nil
+                    GTNValue = StackValueFromValue(null);
+
+                this.registers[instruction.A!] = GTNValue;
+
+                this.pointer++;
+                break;
+
+            case OpCode.SETTABLEN: // set value in table using smallint as a key (C)
+                let STNTable = this.registers[instruction.B!];
+                if (STNTable.type != StackType.Table) this.throwError("LVM > Attempt to set table value from non-table");
+
+                (STNTable.value as LuaTable).set(instruction.C!, this.registers[instruction.A!]);
+
+                this.pointer++;
+                break;
+
+            case OpCode.NEWCLOSURE: // create a new closure from a lua proto!
+                // because this closure should be able to use the upvalues of the parents parent, we pass all upvalues of this closure.
+                let newClosure = new LuaClosure(this.parentProgram, instruction.D!, this.upValues);
+                this.registers[instruction.A!] = {type: StackType.Closure, value: newClosure};
+                this.pointer++;
+                break;
+
+            case OpCode.NAMECALL: // call a function by name?
+                // NAMECALL: prepare to call specified method by name by loading function from source register using constant index into target register and copying source register into target register + 1
+                // assuiming source register is a table, the constant will be the key to the table
+                // then moving the function to the target register
+                // then moving the table to the target register + 1 so this.register[T + 1] will contain the source table
+
+                let NCtable = this.registers[instruction.B!];
+                assert(NCtable.type == StackType.Table, "LVM > Attempt to call a non-table");
+
+                let NCkey = this.baseProto.Constants[instruction.Aux!.readUint32LE(0)];
+                let NCvalue = (NCtable.value as LuaTable).get(NCkey.value);
+                if (NCvalue == undefined) throw new Error("LVM > Value not found in table");
+                if (NCvalue.type != StackType.Closure) throw new Error("LVM > Attempt to namecall a non-function?");
+
+                this.registers[instruction.A!] = NCvalue; // move the function to the target register
+                this.registers[instruction.A! + 1] = NCtable; // move the table to the target register + 1
+
+                if (this.code[this.pointer + 1].OpCode != OpCode.CALL)
+                    throw new Error("LVM > NAMECALL must be followed by CALL, Bytecode is invalid!");
+
+                this.pointer += 1;
+                break;
+
+            case OpCode.CALL: // run a closure from stack! YAY!!!!
+                let callClosure = this.registers[instruction.A!];
+                if (callClosure.type != StackType.Closure) throw new Error("LVM > Attempt to call a non-function, huh?");
+
+                let callAgumentCount = instruction.B!; // the first argument is the function itself
+                if (callAgumentCount == 0) // function is MULTRET
+                {
+                    //console.log("MULTRET");
+                    //console.log(instruction.A, instruction.B)
+                    callAgumentCount = this.registers.length - instruction.A!; 
+                    //console.log("MULTRET", callAgumentCount);
+                    //callAgumentCount = 1;
+                } else {
+                    callAgumentCount = instruction.B! - 1;
+                }
+
+                let callArugments = this.registers.slice(instruction.A! + 1, instruction.A! + 1 + callAgumentCount);
+                //console.log("Calling closure: ", callClosure);
+                //console.log("Calling closure with args: ", callArugments);
+                
+                let resp = await (callClosure.value as Closure).Call(...callArugments);
+
+                let returnNumber = resp.length;
+                if (instruction.C! != 0 )
+                {
+                    returnNumber = instruction.C! - 1;
+                }
+
+                for (let i = 0; i < returnNumber; i++)
+                {
+                    if (resp[i] == undefined)
+                        this.registers[instruction.A! + i] = {type: StackType.Nil, value: null};
+                    else
+                        this.registers[instruction.A! + i] = resp[i];
+                }
+
+                this.pointer++
                 break;
 
             default:
@@ -525,7 +679,7 @@ class LuaClosure implements Closure {
 
 }
 
-export function DeserializeLuau(source: Buffer)
+export async function DeserializeLuau(source: Buffer)
 {
     const reader = new BinaryReader(source);
     const lProgram = {} as Program;
@@ -577,12 +731,20 @@ export function DeserializeLuau(source: Buffer)
     lProgram.GlobalEnv = new Map<string, StackValue>();
     
     lProgram.Imports = {
-        print: nodePrint
+        print: nodePrint,
+        math: {
+            add: wrapNodeFunction((a: number, b: number) => { return [a + b] })
+        }
     }
 
     let WrapedProto = new LuaClosure(lProgram, lProgram.MainProto, new Map<number, UpValue>());
-    WrapedProto.runInstruction();
-    WrapedProto.runInstruction();
-    WrapedProto.runInstruction();
+    await WrapedProto.runInstruction();
+    await WrapedProto.runInstruction();
+    await WrapedProto.runInstruction();
+    await WrapedProto.runInstruction();
+    await WrapedProto.runInstruction();
+    await WrapedProto.runInstruction();
+    await WrapedProto.runInstruction();
+    await WrapedProto.runInstruction();
 
 }

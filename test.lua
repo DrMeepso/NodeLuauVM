@@ -1,1 +1,2 @@
-print("Hello world!")
+-- jello world
+print(math.add(1, 2))
