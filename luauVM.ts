@@ -361,6 +361,11 @@ class LuaClosure implements Closure {
     upValues: Map<number, UpValue>;
     myUpValues: Map<number, UpValue>; // up values that refer to things in this closure, upvals for functions called inside this closure
 
+    topOfStack = -1; // the top of the stack, used for vararg functions
+
+    hasFinished: boolean = false;
+    returnValues: StackValue[] = [];
+
     constructor(parentProgram: Program, Proto: number, Upvalues: Map<number, UpValue>)
     {
         this.parentProgram = parentProgram;
@@ -389,7 +394,7 @@ class LuaClosure implements Closure {
         }
         let instruction = this.code[this.pointer];
 
-        console.log("Running instruction: ", OpCodeNames[instruction.OpCode]);
+        //console.log("Running instruction: ", OpCodeNames[instruction.OpCode]);
         switch(instruction.OpCode)
         {
             case OpCode.NOP: // no operation
@@ -426,7 +431,8 @@ class LuaClosure implements Closure {
 
             case OpCode.MOVE: // copy the value of one register to another
                 let v = this.registers[instruction.B!];
-                Object.assign(this.registers[instruction.A!], v);
+                //Object.assign(this.registers[instruction.A!], v);
+                this.registers[instruction.A!] = v
                 this.pointer++;
                 break;
 
@@ -437,7 +443,8 @@ class LuaClosure implements Closure {
                 if (globalGetKey.type != StackType.String) this.throwError("LVM > Global key is not a string");
 
                 let globalValue = this.parentProgram.GlobalEnv.get(globalGetKey.value as string);
-                if (globalValue == undefined) throw new Error("LVM > Global value not found");
+                if (globalValue == undefined)
+                    globalValue = StackValueFromValue(null);
 
                 // this can be anything from the global environment
                 this.registers[instruction.A!] = {type: globalValue.type, value: globalValue.value};
@@ -502,7 +509,7 @@ class LuaClosure implements Closure {
 
                 // AUX: 3 10-bit indices of constant strings that, combined, constitute an import path; length of the path is set by the top 2 bits (1,2,3)
                 let aux = instruction.Aux!.readUint32LE(0);
-                let pathLength: number = 3 - Math.abs((aux >> 30) + 1);
+                let pathLength: number = (aux >>> 30)
                 
                 let indices = [(aux >> 20) & 0x3FF, (aux >> 10) & 0x3FF, aux & 0x3FF];
                 //console.log(this.baseProto.Constants)
@@ -522,6 +529,8 @@ class LuaClosure implements Closure {
                 }
 
                 if (imported == undefined) throw new Error("LVM > Import path not found");
+
+                //console.log("Imported: ", imported);
 
                 this.registers[instruction.A!] = {type: StackType.Closure, value: imported as Closure};
 
@@ -628,18 +637,12 @@ class LuaClosure implements Closure {
                 let callAgumentCount = instruction.B!; // the first argument is the function itself
                 if (callAgumentCount == 0) // function is MULTRET
                 {
-                    //console.log("MULTRET");
-                    //console.log(instruction.A, instruction.B)
-                    callAgumentCount = this.registers.length - instruction.A!; 
-                    //console.log("MULTRET", callAgumentCount);
-                    //callAgumentCount = 1;
+                    callAgumentCount = this.topOfStack - instruction.A!;
                 } else {
                     callAgumentCount = instruction.B! - 1;
                 }
 
                 let callArugments = this.registers.slice(instruction.A! + 1, instruction.A! + 1 + callAgumentCount);
-                //console.log("Calling closure: ", callClosure);
-                //console.log("Calling closure with args: ", callArugments);
                 
                 let resp = await (callClosure.value as Closure).Call(...callArugments);
 
@@ -647,6 +650,8 @@ class LuaClosure implements Closure {
                 if (instruction.C! != 0 )
                 {
                     returnNumber = instruction.C! - 1;
+                } else {
+                    this.topOfStack = instruction.A! + returnNumber - 1;
                 }
 
                 for (let i = 0; i < returnNumber; i++)
@@ -660,9 +665,167 @@ class LuaClosure implements Closure {
                 this.pointer++
                 break;
 
+            case OpCode.RETURN: // return a value from the closure!
+
+                let ReturnIndexStart = instruction.A!;
+                let ReturnCount = instruction.B! - 1;
+
+                if (ReturnCount == -1)
+                {
+                    ReturnCount = this.topOfStack - ReturnIndexStart + 1;
+                }
+
+                this.returnValues = this.registers.slice(ReturnIndexStart, ReturnIndexStart + ReturnCount);
+                this.hasFinished = true;
+
+                break;
+
+            case OpCode.JUMP: // jump to a location in the bytecode
+            case OpCode.JUMPBACK: // used for interupts of while and for loops
+                this.pointer += instruction.D!;
+                break;
+
+            case OpCode.JUMPIF: // jump if the source register is not nil or false
+                if (this.registers[instruction.A!].value != null && this.registers[instruction.A!].value != false)
+                {
+                    this.pointer += instruction.D!;
+                } else {
+                    this.pointer++;
+                }
+                break;
+
+            case OpCode.JUMPIFNOT: // jump if the source register is nil or false
+                if (this.registers[instruction.A!].value == null || this.registers[instruction.A!].value == false)
+                {
+                    this.pointer += instruction.D!;
+                } else {
+                    this.pointer++;
+                }
+                break;
+
+            // jump operators, jumping if the condition is met
+            // A: source register 1
+            // D: jump offset
+            // AUX: source register 2
+            case OpCode.JUMPIFEQ: // jump if the source registers are equal
+                if (this.registers[instruction.A!].value == this.registers[instruction.Aux!.readUInt32LE(0)].value)
+                    this.pointer += instruction.D!;
+                 else
+                    this.pointer++;
+                break;
+
+            case OpCode.JUMPIFLE: // jump if source register 1 is less than or equal to source register 2
+                if ((this.registers[instruction.A!].value as number) <= (this.registers[instruction.Aux!.readUInt32LE(0)].value as number))
+                    this.pointer += instruction.D!;
+                else 
+                    this.pointer++;
+                break;
+
+            case OpCode.JUMPIFLT: // jump if source register 1 is less than source register 2
+                if ((this.registers[instruction.A!].value as number) < (this.registers[instruction.Aux!.readUInt32LE(0)].value as number))
+                    this.pointer += instruction.D!;
+                else
+                    this.pointer++;
+                break;
+
+            case OpCode.JUMPIFNOTEQ: // jump if the source registers are not equal
+                if (this.registers[instruction.A!].value != this.registers[instruction.Aux!.readUInt32LE(0)].value)
+                    this.pointer += instruction.D!;
+                else
+                    this.pointer++;
+                break;
+
+            case OpCode.JUMPIFNOTLE: // jump if source register 1 is not less than or equal to source register 2
+                if ((this.registers[instruction.A!].value as number) > (this.registers[instruction.Aux!.readUInt32LE(0)].value as number))
+                    this.pointer += instruction.D!;
+                else
+                    this.pointer++;
+                break;
+
+            case OpCode.JUMPIFNOTLT: // jump if source register 1 is not less than source register 2
+                if ((this.registers[instruction.A!].value as number) >= (this.registers[instruction.Aux!.readUInt32LE(0)].value as number))
+                    this.pointer += instruction.D!;
+                else
+                    this.pointer++;
+                break;
+
+            // basic math operators
+            case OpCode.ADD: // add two values together
+                this.registers[instruction.A!] = StackValueFromValue((this.registers[instruction.B!].value as number) + (this.registers[instruction.C!].value as number));
+                this.pointer++;
+                break;
+
+            case OpCode.SUB: // subtract two values
+                this.registers[instruction.A!] = StackValueFromValue((this.registers[instruction.B!].value as number) - (this.registers[instruction.C!].value as number));
+                this.pointer++;
+                break;
+
+            case OpCode.MUL: // multiply two values
+                this.registers[instruction.A!] = StackValueFromValue((this.registers[instruction.B!].value as number) * (this.registers[instruction.C!].value as number));
+                this.pointer++;
+                break;
+
+            case OpCode.DIV: // divide two values
+                this.registers[instruction.A!] = StackValueFromValue((this.registers[instruction.B!].value as number) / (this.registers[instruction.C!].value as number));
+                this.pointer++;
+                break;
+
+            case OpCode.MOD: // modulo two values
+                this.registers[instruction.A!] = StackValueFromValue((this.registers[instruction.B!].value as number) % (this.registers[instruction.C!].value as number));
+                this.pointer++;
+                break;
+
+            case OpCode.POW: // power of two values
+                this.registers[instruction.A!] = StackValueFromValue(Math.pow((this.registers[instruction.B!].value as number), (this.registers[instruction.C!].value as number)));
+                this.pointer++;
+                break;
+
+            // math operators agasnt values from the constant table
+            case OpCode.ADDK:
+                this.registers[instruction.A!] = StackValueFromValue((this.registers[instruction.B!].value as number) + (this.baseProto.Constants[instruction.C!].value as number));
+                this.pointer++;
+                break;
+
+            case OpCode.SUBK:
+                this.registers[instruction.A!] = StackValueFromValue((this.registers[instruction.B!].value as number) - (this.baseProto.Constants[instruction.C!].value as number));
+                this.pointer++;
+                break;
+
+            case OpCode.MULK:
+                this.registers[instruction.A!] = StackValueFromValue((this.registers[instruction.B!].value as number) * (this.baseProto.Constants[instruction.C!].value as number));
+                this.pointer++;
+                break;
+
+            case OpCode.DIVK: 
+                this.registers[instruction.A!] = StackValueFromValue((this.registers[instruction.B!].value as number) / (this.baseProto.Constants[instruction.C!].value as number));
+                this.pointer++;
+                break;
+
+            case OpCode.MODK:
+                this.registers[instruction.A!] = StackValueFromValue((this.registers[instruction.B!].value as number) % (this.baseProto.Constants[instruction.C!].value as number));
+                this.pointer++;
+                break;
+
+            case OpCode.POWK:
+                this.registers[instruction.A!] = StackValueFromValue(Math.pow((this.registers[instruction.B!].value as number), (this.baseProto.Constants[instruction.C!].value as number)));
+                this.pointer++;
+                break;
+            
+            // Logic operators
+            case OpCode.AND: // logical and
+                this.registers[instruction.A!] = StackValueFromValue((this.registers[instruction.B!].value as boolean) && (this.registers[instruction.C!].value as boolean));
+                this.pointer++;
+                break;
+
+            case OpCode.OR: // logical or
+                this.registers[instruction.A!] = StackValueFromValue((this.registers[instruction.B!].value as boolean) || (this.registers[instruction.C!].value as boolean));
+                this.pointer++;
+                break;
+
+
             default:
                 if (instruction.OpCode < OpCode._COUNT) {
-                    console.warn("LVM > Opcode not implemented: " + OpCodeNames[instruction.OpCode]);
+                    console.error("LVM > Opcode not implemented: " + OpCodeNames[instruction.OpCode]);
                     this.pointer++; // probably shouldnt continue
                 } else
                     console.error("Invalid opcode: " + instruction.OpCode);
@@ -671,10 +834,21 @@ class LuaClosure implements Closure {
 
     }
 
-    // implement later
     async Call(...args: StackValue[]): Promise<StackValue[]>
     {
-        return args;
+        return new Promise(async (resolve, reject) => {
+            this.registers = args;
+            this.topOfStack = args.length - 1;
+            this.hasFinished = false;
+            this.returnValues = [];
+            while (!this.hasFinished)
+            {
+                console.log("LVM > Running instruction:" + this.pointer);
+                console.log("Program Line:", this.baseProto.InstructionInfo[this.pointer]);
+                await this.runInstruction();
+            }
+            resolve(this.returnValues);
+        });
     }
 
 }
@@ -733,18 +907,15 @@ export async function DeserializeLuau(source: Buffer)
     lProgram.Imports = {
         print: nodePrint,
         math: {
-            add: wrapNodeFunction((a: number, b: number) => { return [a + b] })
+            add: wrapNodeFunction((a: number, b: number) => { return [a + b, false] })
         }
     }
 
     let WrapedProto = new LuaClosure(lProgram, lProgram.MainProto, new Map<number, UpValue>());
-    await WrapedProto.runInstruction();
-    await WrapedProto.runInstruction();
-    await WrapedProto.runInstruction();
-    await WrapedProto.runInstruction();
-    await WrapedProto.runInstruction();
-    await WrapedProto.runInstruction();
-    await WrapedProto.runInstruction();
-    await WrapedProto.runInstruction();
+    
+    console.log(WrapedProto.baseProto.Constants);
+
+    let values = await WrapedProto.Call();
+    console.log("Return values: ", values);
 
 }

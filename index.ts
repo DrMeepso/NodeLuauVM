@@ -1,6 +1,5 @@
 import { spawn } from "child_process";
 import { DeserializeLuau } from "./luauVM";
-import fs from "fs";
 
 function GenByteCode(fileName: string): Promise<Buffer> // byte code
 {

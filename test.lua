@@ -1,2 +1,5 @@
--- jello world
-print(math.add(1, 2))
+function Main()
+    return 1
+end
+
+return Main() + 1

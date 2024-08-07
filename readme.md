@@ -5,7 +5,7 @@ Based on the [Luau Repo's VM](https://github.com/luau-lang/luau) and [Fiu](https
 --- 
 ## Progress
 
-### OpCodes Implemented: 13/84
+### OpCodes Implemented: 44/84
 
 ### APIs Implemented: 0
 - [ ] `os`
