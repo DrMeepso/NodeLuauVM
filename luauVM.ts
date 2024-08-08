@@ -58,7 +58,7 @@ export interface StackValue {
     value: LuaType;
 }
 
-export type ImportTable = { [key: string]: Closure | ImportTable };
+export type ImportTable = { [key: string]: LuaType | ImportTable };
 
 export interface Program {
     Protos: Array<Proto>;
@@ -404,27 +404,23 @@ export async function DeserializeLuau(source: Buffer)
     lProgram.GlobalEnv = new Map<string, StackValue>();
     
     function IPairs(table: LuaTable): LuaType[] {
-        let generator = wrapNodeFunction(function(tableg: LuaTable, index: number) {
-            let val = tableg.get(index + 1)?.value
+        const generator = wrapNodeFunction(function(tableg: LuaTable, index: number) {
+            const val = tableg.get(index + 1)?.value
             return [val ? index + 1 : null, val];
         });
-        //console.log("IPairs: ", table);
         return [generator, table, 0];
     }
 
     function Pairs(table: LuaTable): LuaType[]
     {
-
-        let MapKeys: LuaType[] = []
-
+        const MapKeys: LuaType[] = []
         table.forEach((value, key) => {
             MapKeys.push(key);
         });
-
-        let generator = wrapNodeFunction(function(tableg: LuaTable, index: LuaType) {
-            let nextIndex = MapKeys[MapKeys.indexOf(index) + 1]
+        const generator = wrapNodeFunction(function(tableg: LuaTable, index: LuaType) {
+            const nextIndex = MapKeys[MapKeys.indexOf(index) + 1]
             if (nextIndex == null) return [null, null];
-            let val = tableg.get(nextIndex)?.value;
+            const val = tableg.get(nextIndex)?.value;
             return [nextIndex, val];
         });
         return [generator, table, null];
@@ -437,7 +433,8 @@ export async function DeserializeLuau(source: Buffer)
         pairs: wrapNodeFunction(Pairs),
         math: {
             add: wrapNodeFunction((a: number, b: number) => { return [a + b] })
-        }
+        },
+        _VERSION: "Luau 6, JSRuntime"
     }
 
     let WrapedProto = new LuaClosure(lProgram, lProgram.MainProto, new Map<number, UpValue>());
@@ -445,6 +442,6 @@ export async function DeserializeLuau(source: Buffer)
     let WrapedMain = WrapClosure(WrapedProto);
 
     let values = await WrapedMain();
-    console.log("Return values: ", values);
+    //console.log("Return values: ", values);
 
 }

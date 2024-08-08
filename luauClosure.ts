@@ -183,25 +183,32 @@ export class LuaClosure implements Closure {
                 let indices = [(aux >> 20) & 0x3FF, (aux >> 10) & 0x3FF, aux & 0x3FF];
                 //console.log(this.baseProto.Constants)
                 let currentTable: ImportTable = this.parentProgram.Imports;
-                let imported: Closure | undefined = undefined;
+                let imported: LuaType | undefined = undefined;
                 let importConsts: string[] = [ this.baseProto.Constants[indices[0]].value as string, this.baseProto.Constants[indices[1]].value as string, this.baseProto.Constants[indices[2]].value as string ];
 
                 if (pathLength == 1) {
-                    imported = currentTable[importConsts[0]] as Closure;
+                    imported = currentTable[importConsts[0]] as LuaType;
                 } else if (pathLength == 2) {
                     let subTable: ImportTable = currentTable[importConsts[0]] as ImportTable;
-                    imported = subTable[importConsts[1]] as Closure;
+                    if (subTable == undefined)
+                        imported = null;
+                    else
+                        imported = subTable[importConsts[1]] as LuaType;
                 } else if (pathLength == 3) {
                     let subTable: ImportTable = currentTable[importConsts[0]] as ImportTable;
-                    let subSubTable: ImportTable = subTable[importConsts[1]] as ImportTable;
-                    imported = subSubTable[importConsts[2]] as Closure;
+                    if (subTable == undefined)
+                        imported = null;
+                    else
+                    {
+                        let subSubTable: ImportTable = subTable[importConsts[1]] as ImportTable;
+                        if (subSubTable == undefined)
+                            imported = null;
+                        else
+                            imported = subSubTable[importConsts[2]] as LuaType;
+                    }
                 }
-
-                if (imported == undefined) throw new Error("LVM > Import path not found");
-
-                //console.log("Imported: ", imported);
-
-                this.registers[instruction.A!] = {type: StackType.Closure, value: imported as Closure};
+                
+                this.registers[instruction.A!] = StackValueFromValue(imported);
 
                 this.pointer++;
                 break;
