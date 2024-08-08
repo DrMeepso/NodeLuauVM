@@ -123,6 +123,9 @@ export function ReadProto(reader: BinaryReader, ByteCodeID: number, StringArray:
         }
         let inst = ReadOpCode(buff);
         Instructions.push(inst);
+        if (hasAUX) // write another noop instruction
+            Instructions.push({A: 0, B: 0, C: 0, D: 0, E: 0, Aux: Buffer.alloc(0), OpCode: 0});
+            
     }
 
     //console.log("Instructions: ", Instructions);
@@ -318,7 +321,8 @@ class NodeClosure implements Closure {
         return args;
     }
     LuaArgsToNodeArgs(args: StackValue[]): any[] {
-        return args.map((arg) => { return arg.value });
+        if (args == null) return [];
+        return args.map((arg) => { return arg ? arg.value : null });
     }
     NodeArgsToLuaArgs(args: any[]): StackValue[] {
         if (args == null) return [];
@@ -399,9 +403,20 @@ export async function DeserializeLuau(source: Buffer)
 
     lProgram.GlobalEnv = new Map<string, StackValue>();
     
+    function IPairs(table: LuaTable): LuaType[] {
+        let generator = wrapNodeFunction(function(tableg: LuaTable, index: number) {
+            //console.log("IPairs: ", tableg.get(index + 1));
+            let val = tableg.get(index + 1)?.value
+            return [val ? index + 1 : null, val];
+        });
+        //console.log("IPairs: ", table);
+        return [generator, table, 0];
+    }
+
     lProgram.Imports = {
         print: nodePrint,
         wait: wrapNodeFunction((time: number) => { return new Promise((resolve) => { setTimeout(resolve, time) }) }),
+        ipairs: wrapNodeFunction(IPairs),
         math: {
             add: wrapNodeFunction((a: number, b: number) => { return [a + b] })
         }

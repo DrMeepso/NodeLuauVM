@@ -66,7 +66,7 @@ export class LuaClosure implements Closure {
         switch(instruction.OpCode)
         {
             case OpCode.NOP: // no operation
-                console.warn("LVM > why was there a NOP?");
+                //console.warn("LVM > why was there a NOP?");
                 this.pointer++;
                 break
 
@@ -183,17 +183,17 @@ export class LuaClosure implements Closure {
                 //console.log(this.baseProto.Constants)
                 let currentTable: ImportTable = this.parentProgram.Imports;
                 let imported: Closure | undefined = undefined;
-                let consts: string[] = [ this.baseProto.Constants[indices[0]].value as string, this.baseProto.Constants[indices[1]].value as string, this.baseProto.Constants[indices[2]].value as string ];
+                let importConsts: string[] = [ this.baseProto.Constants[indices[0]].value as string, this.baseProto.Constants[indices[1]].value as string, this.baseProto.Constants[indices[2]].value as string ];
 
                 if (pathLength == 1) {
-                    imported = currentTable[consts[0]] as Closure;
+                    imported = currentTable[importConsts[0]] as Closure;
                 } else if (pathLength == 2) {
-                    let subTable: ImportTable = currentTable[consts[0]] as ImportTable;
-                    imported = subTable[consts[1]] as Closure;
+                    let subTable: ImportTable = currentTable[importConsts[0]] as ImportTable;
+                    imported = subTable[importConsts[1]] as Closure;
                 } else if (pathLength == 3) {
-                    let subTable: ImportTable = currentTable[consts[0]] as ImportTable;
-                    let subSubTable: ImportTable = subTable[consts[1]] as ImportTable;
-                    imported = subSubTable[consts[2]] as Closure;
+                    let subTable: ImportTable = currentTable[importConsts[0]] as ImportTable;
+                    let subSubTable: ImportTable = subTable[importConsts[1]] as ImportTable;
+                    imported = subSubTable[importConsts[2]] as Closure;
                 }
 
                 if (imported == undefined) throw new Error("LVM > Import path not found");
@@ -312,6 +312,8 @@ export class LuaClosure implements Closure {
 
                 let callArugments = this.registers.slice(instruction.A! + 1, instruction.A! + 1 + callAgumentCount);
                 
+                //console.log("Calling closure: ", (callClosure.value! as Closure).Call!, " with ", callAgumentCount, " arguments");
+                //console.log("Call arguments: ", callArugments);
                 let resp = await (callClosure.value as Closure).Call(...callArugments);
 
                 let returnNumber = resp.length;
@@ -319,11 +321,13 @@ export class LuaClosure implements Closure {
                 {
                     returnNumber = instruction.C! - 1;
                 } else {
+                    //console.log("MULTRET")
                     this.topOfStack = instruction.A! + returnNumber - 1;
                 }
 
                 for (let i = 0; i < returnNumber; i++)
                 {
+                    //console.log("Setting register: ", instruction.A! + i, " to ", resp[i]);
                     if (resp[i] == undefined)
                         this.registers[instruction.A! + i] = {type: StackType.Nil, value: null};
                     else
@@ -593,6 +597,37 @@ export class LuaClosure implements Closure {
                 
                 break;
             
+            case OpCode.FORGPREP_INEXT: // setup registers for a generic for loop!
+            case OpCode.FORGPREP_NEXT: // setup registers for a generic for loop!
+                this.pointer += instruction.D! + 1;
+                //console.log(instruction.D!)
+                break;
+
+            case OpCode.FORGLOOP: // run a generic for loop!
+
+                this.topOfStack = instruction.A! + 6; // i dont know where 6 comes from, but it works
+
+                let Generator = this.registers[instruction.A!].value as Closure;
+                let State = this.registers[instruction.A! + 1]
+                let FGIndex = this.registers[instruction.A! + 2]
+
+                if (!Generator)
+                    throw new Error("LVM > Attempt to run a nil generator");
+
+                let vals = await Generator.Call(State, FGIndex);
+                let loopVariableCount = (24 >>> instruction.Aux!.readUint32LE(0)) & 0xFF;
+                for (let i = 0; i < loopVariableCount; i++)
+                {
+                    this.registers[instruction.A! + 3 + i] = vals[i];
+                }
+
+                if (this.registers[instruction.A! + 3].value != null) {
+                    this.registers[instruction.A! + 2] = this.registers[instruction.A! + 3];
+                    this.pointer += instruction.D! + 1;
+                } else
+                    this.pointer += 1;
+
+                break;
 
             default:
                 if (instruction.OpCode < OpCode._COUNT) {
@@ -614,9 +649,12 @@ export class LuaClosure implements Closure {
             this.returnValues = [];
             while (!this.hasFinished)
             {
-                //console.log("LVM > Running instruction:" + this.pointer);
+                //console.log("LVM > Running instruction:" + this.pointer, OpCodeNames[this.code[this.pointer].OpCode]);
                 //console.log("Program Line:", this.baseProto.InstructionInfo[this.pointer]);
                 await this.runInstruction();
+
+                //console.log(this.registers[1])
+
             }
             resolve(this.returnValues);
         });
