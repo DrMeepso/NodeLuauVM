@@ -572,7 +572,27 @@ export class LuaClosure implements Closure {
                 break;
 
             case OpCode.FORNPREP: // setup registers for a numeric for loop!
+                let Limmit = this.registers[instruction.A!].value as number;
+                let Step = this.registers[instruction.A! + 1].value as number;
+                let Index = this.registers[instruction.A! + 2].value as number;
+
+                // jump to the next instruction if the loop shouldnt run
+                this.pointer += (Step > 0 ? Index <= Limmit : Limmit <= Index) ? 1 : instruction.D!;
+                break;
+
+            case OpCode.FORNLOOP: // run the numeric for loop!
+                let NLLimmit = this.registers[instruction.A!].value as number;
+                let NLStep = this.registers[instruction.A! + 1].value as number;
+                let NLIndex = this.registers[instruction.A! + 2].value as number;
+                this.registers[instruction.A! + 2] = StackValueFromValue(NLIndex + NLStep);
+
+                if (NLStep > 0 ? NLIndex <= NLLimmit : NLLimmit <= NLIndex)
+                    this.pointer += instruction.D!;
+                else
+                    this.pointer++;
                 
+                break;
+            
 
             default:
                 if (instruction.OpCode < OpCode._COUNT) {

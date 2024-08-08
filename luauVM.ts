@@ -311,6 +311,7 @@ export interface Closure {
     type: ClosureType;
     Call(...args: StackValue[]): Promise<StackValue[]>;
 }
+
 class NodeClosure implements Closure {
     type = ClosureType.NODE;
     async Call(...args: StackValue[]): Promise<StackValue[]> {
@@ -357,11 +358,11 @@ export async function DeserializeLuau(source: Buffer)
     if (luauVersion >= 4)
     {
         typesVersion = reader.readByte();
-        console.log("Types version: " + typesVersion);
+        //console.log("Types version: " + typesVersion);
     } else {
         console.error("Unsupported Luau version: " + luauVersion + ", please use version 4 or higher");
     }
-    console.log("Luau version: " + luauVersion);
+    //console.log("Luau version: " + luauVersion);
 
     // read the amount of strings that are in the bytecode
     let stringCount = reader.readVarInt();
@@ -384,17 +385,17 @@ export async function DeserializeLuau(source: Buffer)
     }
 
     let protoCount = reader.readVarInt();
-    console.log("Proto count: " + protoCount);
+    //console.log("Proto count: " + protoCount);
     let Protos: Array<Proto> = [];
     for (let i = 0; i < protoCount; i++)
     {
         Protos.push(ReadProto(reader, i, stringTable));
-        console.log("Proto:", Protos[i].DebugName || "(??)");
+        //console.log("Proto:", Protos[i].DebugName || "(??)");
     }
     lProgram.Protos = Protos;
 
     lProgram.MainProto = reader.readVarInt() as number;
-    console.log("Main proto index: " + lProgram.MainProto);
+    //console.log("Main proto index: " + lProgram.MainProto);
 
     lProgram.GlobalEnv = new Map<string, StackValue>();
     

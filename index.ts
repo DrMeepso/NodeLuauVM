@@ -17,7 +17,8 @@ function GenByteCode(fileName: string): Promise<Buffer> // byte code
         });
 
         luauCompiler.on("close", (code) => {
-            console.log(`child process exited with code ${code}`);
+            //console.log(`child process exited with code ${code}`);
+            console.log("LC > Bytecode compiled successfully");
             resolve(byteCode);
         });
 
