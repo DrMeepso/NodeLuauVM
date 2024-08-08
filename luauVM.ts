@@ -405,7 +405,6 @@ export async function DeserializeLuau(source: Buffer)
     
     function IPairs(table: LuaTable): LuaType[] {
         let generator = wrapNodeFunction(function(tableg: LuaTable, index: number) {
-            //console.log("IPairs: ", tableg.get(index + 1));
             let val = tableg.get(index + 1)?.value
             return [val ? index + 1 : null, val];
         });
@@ -413,16 +412,36 @@ export async function DeserializeLuau(source: Buffer)
         return [generator, table, 0];
     }
 
+    function Pairs(table: LuaTable): LuaType[]
+    {
+
+        let MapKeys: LuaType[] = []
+
+        table.forEach((value, key) => {
+            MapKeys.push(key);
+        });
+
+        let generator = wrapNodeFunction(function(tableg: LuaTable, index: LuaType) {
+            let nextIndex = MapKeys[MapKeys.indexOf(index) + 1]
+            if (nextIndex == null) return [null, null];
+            let val = tableg.get(nextIndex)?.value;
+            return [nextIndex, val];
+        });
+        return [generator, table, null];
+    }
+
     lProgram.Imports = {
         print: nodePrint,
         wait: wrapNodeFunction((time: number) => { return new Promise((resolve) => { setTimeout(resolve, time) }) }),
         ipairs: wrapNodeFunction(IPairs),
+        pairs: wrapNodeFunction(Pairs),
         math: {
             add: wrapNodeFunction((a: number, b: number) => { return [a + b] })
         }
     }
 
     let WrapedProto = new LuaClosure(lProgram, lProgram.MainProto, new Map<number, UpValue>());
+    //console.log("Constants:", WrapedProto.baseProto.Constants);
     let WrapedMain = WrapClosure(WrapedProto);
 
     let values = await WrapedMain();

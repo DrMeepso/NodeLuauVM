@@ -65,6 +65,7 @@ export class LuaClosure implements Closure {
         //console.log("Running instruction: ", OpCodeNames[instruction.OpCode]);
         switch(instruction.OpCode)
         {
+            case OpCode.PREPVARARGS: // each closure has it's own stack so this is unused!
             case OpCode.NOP: // no operation
                 //console.warn("LVM > why was there a NOP?");
                 this.pointer++;
@@ -547,7 +548,8 @@ export class LuaClosure implements Closure {
                 let DupedTable: LuaTable = new Map<LuaType, StackValue>();
                 for (let [key, value] of (dupTable.value as LuaTable).entries())
                 {
-                    DupedTable.set(key, value);
+                    let ck: number = value.value as number;
+                    DupedTable.set(this.baseProto.Constants[ck].value, StackValueFromValue(null));
                 }
                 this.registers[instruction.A!] = {type: StackType.Table, value: DupedTable};
                 this.pointer++;
@@ -597,8 +599,12 @@ export class LuaClosure implements Closure {
                 
                 break;
             
-            case OpCode.FORGPREP_INEXT: // setup registers for a generic for loop!
-            case OpCode.FORGPREP_NEXT: // setup registers for a generic for loop!
+            // tbh i dont know what these do, they seem to have some deeper meaning
+            // in the official VM, but from what i can see they can just jump to the
+            // FORGLOOP instruction and it works fine, so...
+            case OpCode.FORGPREP_INEXT:
+            case OpCode.FORGPREP_NEXT:
+            case OpCode.FORGPREP:
                 this.pointer += instruction.D! + 1;
                 //console.log(instruction.D!)
                 break;

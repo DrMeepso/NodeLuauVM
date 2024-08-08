@@ -16,4 +16,9 @@ for k,v in ipairs(tmp) do
     print(k,v)
 end
 
+local tmp2 = {a=10,b=20,c=30,d=40,e=50}
+for k,v in pairs(tmp2) do
+    print(k,v)
+end
+
 print("Hello world, this is lua!")
