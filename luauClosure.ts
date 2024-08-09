@@ -34,6 +34,8 @@ export class LuaClosure implements Closure {
     hasFinished: boolean = false;
     returnValues: StackValue[] = [];
 
+    varArgs: StackValue[] = [];
+
     constructor(parentProgram: Program, Proto: number, Upvalues: Map<number, UpValue>)
     {
         this.parentProgram = parentProgram;
@@ -65,6 +67,9 @@ export class LuaClosure implements Closure {
         //console.log("Running instruction: ", OpCodeNames[instruction.OpCode]);
         switch(instruction.OpCode)
         {
+            case OpCode._COUNT: // this is only used to check how many opcodes there are
+            case OpCode.NATIVECALL: // used to tell the vm to run the closure as native, but is constructed at runtime
+            // so we dont need to worry about it here
             case OpCode.PREPVARARGS: // each closure has it's own stack so this is unused!
             case OpCode.NOP: // no operation
                 //console.warn("LVM > why was there a NOP?");
@@ -639,7 +644,43 @@ export class LuaClosure implements Closure {
                     this.pointer += instruction.D! + 1;
                 } else
                     this.pointer += 1;
+                break;
 
+            case OpCode.FASTCALL:
+            case OpCode.FASTCALL1:
+            case OpCode.FASTCALL2:
+            case OpCode.FASTCALL2K:
+            case OpCode.FASTCALL3:
+                // because fast calls can fail there are instructions behind
+                // the fast call to do the call like any other call
+                // so for now we are able to just skip these.
+                this.pointer++;
+                break;
+
+            case OpCode.GETVARARGS: // get all the varargs and push them to the stack
+            
+                let argCount = instruction.B! - 1;
+                if (instruction.B! == 0) { // multiret 
+                    argCount = this.varArgs.length;
+                    this.topOfStack = instruction.A! + argCount - 1;
+                } 
+
+                // push the varargs to the stack starting at A
+                let VarArgs = this.varArgs.slice(0, argCount);
+                for (let i = 0; i < argCount; i++)
+                {
+                    this.registers[instruction.A! + i] = VarArgs[i];
+                }
+                this.pointer++;
+                break;
+            
+            case OpCode.DUPCLOSURE: // place a closure in the target register
+                let protoTypeIndex = this.baseProto.Constants[instruction.D!].value as number;
+
+                let dupedClosure = new LuaClosure(this.parentProgram, protoTypeIndex, this.upValues);
+                this.registers[instruction.A!] = {type: StackType.Closure, value: dupedClosure};
+
+                this.pointer++;
                 break;
 
             default:
@@ -655,9 +696,11 @@ export class LuaClosure implements Closure {
 
     async Call(...args: StackValue[]): Promise<StackValue[]>
     {
+        //console.log("Args: ", args);
         return new Promise(async (resolve, reject) => {
+
+            this.varArgs = Object.assign([], args);
             this.registers = args;
-            this.topOfStack = args.length - 1;
             this.hasFinished = false;
             this.returnValues = [];
             while (!this.hasFinished)

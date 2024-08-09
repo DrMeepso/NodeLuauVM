@@ -1,3 +1,4 @@
+import { assert } from "console";
 import { BinaryReader } from "./binaryReader";
 import { LuaClosure } from "./luauClosure";
 import { HasAux, ReadOpCode, type Instruction } from "./readWord";
@@ -431,10 +432,8 @@ export async function DeserializeLuau(source: Buffer)
         wait: wrapNodeFunction((time: number) => { return new Promise((resolve) => { setTimeout(resolve, time) }) }),
         ipairs: wrapNodeFunction(IPairs),
         pairs: wrapNodeFunction(Pairs),
-        math: {
-            add: wrapNodeFunction((a: number, b: number) => { return [a + b] })
-        },
-        _VERSION: "Luau 6, JSRuntime"
+        assert: wrapNodeFunction(assert),
+        _VERSION: "Luau 6, JSRuntime",
     }
 
     let WrapedProto = new LuaClosure(lProgram, lProgram.MainProto, new Map<number, UpValue>());
