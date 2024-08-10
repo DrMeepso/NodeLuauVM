@@ -699,8 +699,10 @@ export class LuaClosure implements Closure {
         //console.log("Args: ", args);
         return new Promise(async (resolve, reject) => {
 
-            this.varArgs = Object.assign([], args);
-            this.registers = args;
+            // all vars after the number of exspeceted prams are the variable length arguments
+            // i.e function(a, b, c, ...) -> a, b, c are the expected prams, ... is the varargs
+            this.varArgs = Object.assign([], args.splice(this.baseProto.NumParams))
+            this.registers = args
             this.hasFinished = false;
             this.returnValues = [];
             while (!this.hasFinished)
