@@ -683,6 +683,97 @@ export class LuaClosure implements Closure {
                 this.pointer++;
                 break;
 
+            case OpCode.LOADKX: // load a constant from the baseProto into target register using extended index
+                let loadkxConstIndex = instruction.Aux!.readUint32LE(0);
+                let loadkxConst: StackValue = this.baseProto.Constants[loadkxConstIndex];
+                this.registers[instruction.A!] = {type: loadkxConst.type, value: loadkxConst.value};
+                this.pointer++;
+                break;
+
+            case OpCode.JUMPX: // jump to a location in the bytecode using extended offset
+                this.pointer += instruction.Aux!.readInt32LE(0);
+                break;
+
+            case OpCode.COVERAGE: // code coverage tracking - can be implemented as no-op for now
+                // This is used for profiling/debugging and can be safely ignored
+                this.pointer++;
+                break;
+
+            case OpCode.CAPTURE: // capture upvalue
+                // Create an upvalue that references a register in this closure
+                let captureRegister = instruction.B!;
+                let upValueIndex = instruction.A!;
+                
+                // Create a reference upvalue pointing to our register
+                let capturedUpValue: UpValueRef = {
+                    isRef: true,
+                    index: captureRegister,
+                    store: this.registers
+                };
+                
+                this.myUpValues.set(upValueIndex, capturedUpValue);
+                this.pointer++;
+                break;
+
+            case OpCode.SUBRK: // subtract register from constant (C - R[B])
+                this.registers[instruction.A!] = StackValueFromValue((this.baseProto.Constants[instruction.C!].value as number) - (this.registers[instruction.B!].value as number));
+                this.pointer++;
+                break;
+
+            case OpCode.DIVRK: // divide constant by register (C / R[B])
+                this.registers[instruction.A!] = StackValueFromValue((this.baseProto.Constants[instruction.C!].value as number) / (this.registers[instruction.B!].value as number));
+                this.pointer++;
+                break;
+
+            case OpCode.JUMPXEQKNIL: // extended jump if register equals nil constant
+                let jumpxeqknilRegister = this.registers[instruction.A!];
+                if (jumpxeqknilRegister.value === null) {
+                    this.pointer += instruction.Aux!.readInt32LE(0);
+                } else {
+                    this.pointer++;
+                }
+                break;
+
+            case OpCode.JUMPXEQKB: // extended jump if register equals boolean constant
+                let jumpxeqkbRegister = this.registers[instruction.A!];
+                let jumpxeqkbConstant = this.baseProto.Constants[instruction.D!];
+                if (jumpxeqkbRegister.value === jumpxeqkbConstant.value) {
+                    this.pointer += instruction.Aux!.readInt32LE(0);
+                } else {
+                    this.pointer++;
+                }
+                break;
+
+            case OpCode.JUMPXEQKN: // extended jump if register equals number constant
+                let jumpxeqknRegister = this.registers[instruction.A!];
+                let jumpxeqknConstant = this.baseProto.Constants[instruction.D!];
+                if (jumpxeqknRegister.value === jumpxeqknConstant.value) {
+                    this.pointer += instruction.Aux!.readInt32LE(0);
+                } else {
+                    this.pointer++;
+                }
+                break;
+
+            case OpCode.JUMPXEQKS: // extended jump if register equals string constant  
+                let jumpxeqksRegister = this.registers[instruction.A!];
+                let jumpxeqksConstant = this.baseProto.Constants[instruction.D!];
+                if (jumpxeqksRegister.value === jumpxeqksConstant.value) {
+                    this.pointer += instruction.Aux!.readInt32LE(0);
+                } else {
+                    this.pointer++;
+                }
+                break;
+
+            case OpCode.IDIV: // integer division of two registers
+                this.registers[instruction.A!] = StackValueFromValue(Math.floor((this.registers[instruction.B!].value as number) / (this.registers[instruction.C!].value as number)));
+                this.pointer++;
+                break;
+
+            case OpCode.IDIVK: // integer division of register by constant
+                this.registers[instruction.A!] = StackValueFromValue(Math.floor((this.registers[instruction.B!].value as number) / (this.baseProto.Constants[instruction.C!].value as number)));
+                this.pointer++;
+                break;
+
             default:
                 if (instruction.OpCode < OpCode._COUNT) {
                     console.error("LVM > Opcode not implemented: " + OpCodeNames[instruction.OpCode]);
