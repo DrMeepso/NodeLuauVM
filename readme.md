@@ -7,7 +7,16 @@ Based on the [Luau Repo's VM](https://github.com/luau-lang/luau) and [Fiu](https
 --- 
 ## Progress
 
-### OpCodes Implemented: 64/84
+### OpCodes Implemented: 84/84 ✅
+
+All Luau VM opcodes are now implemented, including:
+- LOADKX - Load constant using extended index
+- JUMPX - Extended jump instruction
+- COVERAGE - Code coverage tracking (no-op)
+- CAPTURE - Capture upvalue for closures
+- SUBRK/DIVRK - Reverse arithmetic operations with constants
+- JUMPXEQK* - Extended conditional jumps with constants
+- IDIV/IDIVK - Integer division operations
 
 ### APIs Implemented: 0
 - [ ] `os`
